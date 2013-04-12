@@ -176,14 +176,14 @@ class TreeClassifier:
 
     def _trainPath(self,path,className,subset,disp,verbose):
         count = 0
-        files = []
+        files = [] 
         for ext in IMAGE_FORMATS:
             files.extend(glob.glob( os.path.join(path, ext)))
         if(subset > 0):
             nfiles = min(subset,len(files))
         else:
             nfiles = len(files)
-        badFeat = False
+        badFeat = False   
         for i in range(nfiles):
             infile = files[i]
             if verbose:
@@ -196,11 +196,11 @@ class TreeClassifier:
                     featureVector.extend(feats)
                 else:
                     badFeat = True
-
+                    
             if(badFeat):
                 badFeat = False
                 continue
-
+            
             featureVector.extend([className])
             self.mDataSetRaw.append(featureVector)
             text = 'Training: ' + className
@@ -209,63 +209,95 @@ class TreeClassifier:
             del img
         return count
 
-    def train(self,paths,classNames,disp=None,subset=-1,savedata=None,verbose=True):
+    def _trainImageSet(self,imageset,className,subset,disp,verbose):
+        count = 0
+        badFeat = False
+        if (subset>0):
+            imageset = imageset[0:subset]   
+        for img in imageset:
+            if verbose:
+                print "Opening file: " + img.filename
+            featureVector = []
+            for extractor in self.mFeatureExtractors:
+                feats = extractor.extract(img)
+                if( feats is not None ):
+                    featureVector.extend(feats)
+                else:
+                    badFeat = True
+                    
+            if(badFeat):
+                badFeat = False
+                continue
+            
+            featureVector.extend([className])
+            self.mDataSetRaw.append(featureVector)
+            text = 'Training: ' + className
+            self._WriteText(disp,img,text,Color.WHITE)
+            count = count + 1
+            del img
+        return count
+        
+    def train(self,images,classNames,disp=None,subset=-1,savedata=None,verbose=True):
         """
         Train the classifier.
-        paths the order of the paths in the same order as the class type
-
+        images paramater can take in a list of paths or a list of images
+        images - the order of the paths or the imagesets must be in the same order as the class type 
+        
         - Note all image classes must be in seperate directories
         - The class names must also align to the directories
-
+        
         disp - if display is a display we show images and class label,
         otherwise nothing is done.
-
+        
         subset - if subset = -1 we use the whole dataset. If subset = # then we
         use min(#images,subset)
-
+        
         savedata - if save data is None nothing is saved. If savedata is a file
         name we save the data to a tab delimited file.
-
-        verbose - print confusion matrix and file names
+        
+        verbose - print confusion matrix and file names 
         returns [%Correct %Incorrect Confusion_Matrix]
         """
         #if( (self.mFlavor == 1 or self.mFlavor == 3) and len(classNames) > 2):
         #    logger.warning("Boosting / Bagging only works for binary classification tasks!!!")
-
+            
         count = 0
         self.mClassNames = classNames
         # for each class, get all of the data in the path and train
         for i in range(len(classNames)):
-            count = count + self._trainPath(paths[i],classNames[i],subset,disp,verbose)
-
+            if ( isinstance(images[i], str) ):
+                count = count + self._trainPath(images[i],classNames[i],subset,disp,verbose)
+            else:
+                count = count + self._trainImageSet(images[i],classNames[i],subset,disp,verbose)
+           
         colNames = []
         for extractor in self.mFeatureExtractors:
             colNames.extend(extractor.getFieldNames())
-
+        
         if(count <= 0):
             logger.warning("No features extracted - bailing")
             return None
-
+        
         self.mOrangeDomain = orange.Domain(map(orange.FloatVariable,colNames),orange.EnumVariable("type",values=self.mClassNames))
         self.mDataSetOrange = orange.ExampleTable(self.mOrangeDomain,self.mDataSetRaw)
         if(savedata is not None):
             orange.saveTabDelimited (savedata, self.mDataSetOrange)
-
+        
         if(self.mFlavor == 0):
-            self.mLearner =  orange.TreeLearner()
-            self.mClassifier = self.mLearner(self.mDataSetOrange)
+            self.mLearner =  orange.TreeLearner()      
+            self.mClassifier = self.mLearner(self.mDataSetOrange)            
         elif(self.mFlavor == 1): #bagged
             self.mTree =  orange.TreeLearner()
             self.mLearner = orngEnsemble.BaggedLearner(self.mTree,t=self.mFlavorParams["NClassifiers"])
-            self.mClassifier = self.mLearner(self.mDataSetOrange)
+            self.mClassifier = self.mLearner(self.mDataSetOrange) 
         elif(self.mFlavor == 2):#forest
             self.mTree =  orange.TreeLearner()
             self.mLearner =  orngEnsemble.RandomForestLearner(trees=self.mFlavorParams["NTrees"], attributes=self.mFlavorParams["NAttributes"])
-            self.mClassifier = self.mLearner(self.mDataSetOrange)
+            self.mClassifier = self.mLearner(self.mDataSetOrange) 
         elif(self.mFlavor == 3):#boosted
             self.mTree =  orange.TreeLearner()
             self.mLearner = orngEnsemble.BoostedLearner(self.mTree,t=self.mFlavorParams["NClassifiers"])
-            self.mClassifier = self.mLearner(self.mDataSetOrange)
+            self.mClassifier = self.mLearner(self.mDataSetOrange)     
 
         correct = 0
         incorrect = 0
@@ -273,12 +305,12 @@ class TreeClassifier:
             c = self.mClassifier(self.mDataSetOrange[i])
             test = self.mDataSetOrange[i].getclass()
             if verbose:
-                print "original", test, "classified as", c
+                print "original", test, "classified as", c 
             if(test==c):
                 correct = correct + 1
             else:
                 incorrect = incorrect + 1
-
+                
         good = 100*(float(correct)/float(count))
         bad = 100*(float(incorrect)/float(count))
 
@@ -295,33 +327,34 @@ class TreeClassifier:
                 print "\t"+"\t".join(classes)
                 for className, classConfusions in zip(classes, confusion):
                     print ("%s" + ("\t%i" * len(classes))) % ((className, ) + tuple(    classConfusions))
-
+                    
         if(self.mFlavor == 0):
             self._PrintTree(self.mClassifier)
 
         return [good, bad, confusion]
 
 
-
-
-    def test(self,paths,classNames,disp=None,subset=-1,savedata=None,verbose=True):
+    
+    
+    def test(self,images,classNames,disp=None,subset=-1,savedata=None,verbose=True):
         """
-        Train the classifier.
-        paths the order of the paths in the same order as the class type
-
+        Test the classifier.
+        images paramater can take in a list of paths or a list of images
+        images - the order of the paths or imagesets must be in the same order as the class type 
+        
         - Note all image classes must be in seperate directories
         - The class names must also align to the directories
-
+        
         disp - if display is a display we show images and class label,
         otherwise nothing is done.
-
+        
         subset - if subset = -1 we use the whole dataset. If subset = # then we
         use min(#images,subset)
-
+        
         savedata - if save data is None nothing is saved. If savedata is a file
         name we save the data to a tab delimited file.
-
-        verbose - print confusion matrix and file names
+        
+        verbose - print confusion matrix and file names 
         returns [%Correct %Incorrect Confusion_Matrix]
         """
         count = 0
@@ -332,19 +365,24 @@ class TreeClassifier:
             colNames.extend(extractor.getFieldNames())
             if(self.mOrangeDomain is None):
                 self.mOrangeDomain = orange.Domain(map(orange.FloatVariable,colNames),orange.EnumVariable("type",values=self.mClassNames))
-
+        
         dataset = []
         for i in range(len(classNames)):
-            [dataset,cnt,crct] =self._testPath(paths[i],classNames[i],dataset,subset,disp,verbose)
-            count = count + cnt
-            correct = correct + crct
-
+            if ( isinstance(images[i],str) ):
+                [dataset,cnt,crct] =self._testPath(images[i],classNames[i],dataset,subset,disp,verbose)
+                count = count + cnt
+                correct = correct + crct
+            else:
+                [dataset,cnt,crct] =self._testImageSet(images[i],classNames[i],dataset,subset,disp,verbose)
+                count = count + cnt
+                correct = correct + crct
+            
 
         testData = orange.ExampleTable(self.mOrangeDomain,dataset)
-
+        
         if savedata is not None:
             orange.saveTabDelimited (savedata, testData)
-
+                
         confusion = 0
         if( len(self.mClassNames) > 2 ):
             crossValidator = orngTest.learnAndTestOnTestData([self.mLearner],self.mDataSetOrange,testData)
@@ -361,12 +399,12 @@ class TreeClassifier:
                 for className, classConfusions in zip(classes, confusion):
                     print ("%s" + ("\t%i" * len(classes))) % ((className, ) + tuple(    classConfusions))
         return [good, bad, confusion]
-
+    
     def _testPath(self,path,className,dataset,subset,disp,verbose):
         count = 0
         correct = 0
         badFeat = False
-        files = []
+        files = [] 
         for ext in IMAGE_FORMATS:
             files.extend(glob.glob( os.path.join(path, ext)))
         if(subset > 0):
@@ -388,7 +426,7 @@ class TreeClassifier:
             if( badFeat ):
                 del img
                 badFeat = False
-                continue
+                continue 
             featureVector.extend([className])
             dataset.append(featureVector)
             test = orange.ExampleTable(self.mOrangeDomain,[featureVector])
@@ -398,12 +436,49 @@ class TreeClassifier:
                 text =  "Classified as " + str(c)
                 self._WriteText(disp,img,text, Color.GREEN)
                 correct = correct + 1
-            else:
+            else:   
                 text =  "Mislassified as " + str(c)
                 self._WriteText(disp,img,text, Color.RED)
             count = count + 1
             del img
+            
+        return([dataset,count,correct])
 
+    def _testImageSet(self,imageset,className,dataset,subset,disp,verbose):
+        count = 0
+        correct = 0
+        badFeat = False
+        if(subset > 0):
+            imageset = imageset[0:subset]
+        for img in imageset:
+            if verbose:
+                print "Opening file: " + img.filename
+            featureVector = []
+            for extractor in self.mFeatureExtractors:
+                feats = extractor.extract(img)
+                if( feats is not None ):
+                    featureVector.extend(feats)
+                else:
+                    badFeat = True
+            if( badFeat ):
+                del img
+                badFeat = False
+                continue 
+            featureVector.extend([className])
+            dataset.append(featureVector)
+            test = orange.ExampleTable(self.mOrangeDomain,[featureVector])
+            c = self.mClassifier(test[0])
+            testClass = test[0].getclass()
+            if(testClass==c):
+                text =  "Classified as " + str(c)
+                self._WriteText(disp,img,text, Color.GREEN)
+                correct = correct + 1
+            else:   
+                text =  "Mislassified as " + str(c)
+                self._WriteText(disp,img,text, Color.RED)
+            count = count + 1
+            del img
+            
         return([dataset,count,correct])
 
     def _WriteText(self, disp, img, txt,color):
